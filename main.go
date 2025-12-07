@@ -55,6 +55,64 @@ type Mushroom struct {
 	health int // 0-4 hits to destroy
 }
 
+// Fly enemy
+type Fly struct {
+	pos       Position
+	direction int  // 1 = right, -1 = left
+	active    bool
+	wingFlap  bool // Alternates for wing animation
+}
+
+func (f *Fly) Update() {
+	if !f.active {
+		return
+	}
+
+	// Move horizontally
+	f.pos.X += f.direction * 2 // Flies move faster
+
+	// Toggle wing flap
+	f.wingFlap = !f.wingFlap
+
+	// Deactivate if off screen
+	if f.pos.X < 0 || f.pos.X >= 50 {
+		f.active = false
+	}
+}
+
+// Explosion effect
+type Explosion struct {
+	pos      Position
+	frame    int
+	maxFrame int
+	active   bool
+}
+
+func (e *Explosion) Update() {
+	if !e.active {
+		return
+	}
+	e.frame++
+	if e.frame >= e.maxFrame {
+		e.active = false
+	}
+}
+
+func (e *Explosion) Char() rune {
+	switch e.frame {
+	case 0:
+		return '✶'
+	case 1:
+		return '✸'
+	case 2:
+		return '✹'
+	case 3:
+		return '✺'
+	default:
+		return ' '
+	}
+}
+
 // High Score entry
 type HighScore struct {
 	Name  string
@@ -63,16 +121,18 @@ type HighScore struct {
 
 // Game state
 type Game struct {
-	width     int
-	height    int
-	player    Player
-	segments  []Segment
-	bullets   []Bullet
-	mushrooms []Mushroom
-	score     int
-	level     int
-	gameOver  bool
-	won       bool
+	width      int
+	height     int
+	player     Player
+	segments   []Segment
+	bullets    []Bullet
+	mushrooms  []Mushroom
+	flies      []Fly
+	explosions []Explosion
+	score      int
+	level      int
+	gameOver   bool
+	won        bool
 }
 
 func NewGame(width, height int) *Game {
@@ -116,6 +176,35 @@ func (g *Game) spawnMushrooms(count int) {
 	}
 }
 
+func (g *Game) spawnFly() {
+	// Random chance to spawn fly
+	if rand.Float64() < 0.02 { // 2% chance per tick
+		y := rand.Intn(g.height - 10) + 3 // Middle area
+		direction := 1
+		startX := 0
+		if rand.Float64() < 0.5 {
+			direction = -1
+			startX = g.width - 1
+		}
+
+		g.flies = append(g.flies, Fly{
+			pos:       Position{X: startX, Y: y},
+			direction: direction,
+			active:    true,
+			wingFlap:  false,
+		})
+	}
+}
+
+func (g *Game) createExplosion(x, y int) {
+	g.explosions = append(g.explosions, Explosion{
+		pos:      Position{X: x, Y: y},
+		frame:    0,
+		maxFrame: 4,
+		active:   true,
+	})
+}
+
 func (g *Game) Update() {
 	if g.gameOver || g.won {
 		return
@@ -125,6 +214,19 @@ func (g *Game) Update() {
 	for i := range g.bullets {
 		g.bullets[i].Update()
 	}
+
+	// Update flies
+	for i := range g.flies {
+		g.flies[i].Update()
+	}
+
+	// Update explosions
+	for i := range g.explosions {
+		g.explosions[i].Update()
+	}
+
+	// Spawn flies
+	g.spawnFly()
 
 	// Update centipede segments with improved falling behavior
 	for i := range g.segments {
@@ -164,6 +266,9 @@ func (g *Game) Update() {
 				g.bullets[i].pos.Y == g.segments[j].pos.Y {
 				g.bullets[i].active = false
 
+				// Create explosion
+				g.createExplosion(g.segments[j].pos.X, g.segments[j].pos.Y)
+
 				// Extra points for head
 				if g.segments[j].isHead {
 					g.score += 100
@@ -178,6 +283,24 @@ func (g *Game) Update() {
 				if len(g.segments) > 0 && j == 0 {
 					g.segments[0].isHead = true
 				}
+				break
+			}
+		}
+
+		// Bullet vs Fly
+		for j := range g.flies {
+			if !g.flies[j].active {
+				continue
+			}
+			if g.bullets[i].pos.X == g.flies[j].pos.X &&
+				g.bullets[i].pos.Y == g.flies[j].pos.Y {
+				g.bullets[i].active = false
+				g.flies[j].active = false
+
+				// Create explosion
+				g.createExplosion(g.flies[j].pos.X, g.flies[j].pos.Y)
+
+				g.score += 200 // Flies worth 200 points
 				break
 			}
 		}
@@ -242,20 +365,11 @@ func (g *Game) MovePlayerY(dy int) {
 }
 
 func (g *Game) Shoot() {
-	// Only allow 2 bullets on screen
-	activeBullets := 0
-	for _, b := range g.bullets {
-		if b.active {
-			activeBullets++
-		}
-	}
-
-	if activeBullets < 2 {
-		g.bullets = append(g.bullets, Bullet{
-			pos:    Position{X: g.player.pos.X, Y: g.player.pos.Y - 1},
-			active: true,
-		})
-	}
+	// UNLIMITED BULLETS - removed the limit!
+	g.bullets = append(g.bullets, Bullet{
+		pos:    Position{X: g.player.pos.X, Y: g.player.pos.Y - 1},
+		active: true,
+	})
 }
 
 func (g *Game) GetBoard() [][]rune {
@@ -287,6 +401,29 @@ func (g *Game) GetBoard() [][]rune {
 		}
 	}
 
+	// Draw flies with flickering wing trail
+	for _, fly := range g.flies {
+		if !fly.active {
+			continue
+		}
+		if fly.pos.Y >= 0 && fly.pos.Y < g.height &&
+			fly.pos.X >= 0 && fly.pos.X < g.width {
+			board[fly.pos.Y][fly.pos.X] = '✺'
+
+			// Draw flickering wing trail
+			if fly.wingFlap {
+				trailX := fly.pos.X - fly.direction
+				if trailX >= 0 && trailX < g.width {
+					board[fly.pos.Y][trailX] = '~'
+				}
+				trailX2 := fly.pos.X - (fly.direction * 2)
+				if trailX2 >= 0 && trailX2 < g.width {
+					board[fly.pos.Y][trailX2] = '.'
+				}
+			}
+		}
+	}
+
 	// Draw centipede segments with head differentiation
 	for _, seg := range g.segments {
 		if seg.pos.Y >= 0 && seg.pos.Y < g.height &&
@@ -299,7 +436,15 @@ func (g *Game) GetBoard() [][]rune {
 		}
 	}
 
-	// Draw bullets (improved)
+	// Draw explosions (on top of everything)
+	for _, exp := range g.explosions {
+		if exp.active && exp.pos.Y >= 0 && exp.pos.Y < g.height &&
+			exp.pos.X >= 0 && exp.pos.X < g.width {
+			board[exp.pos.Y][exp.pos.X] = exp.Char()
+		}
+	}
+
+	// Draw bullets (on top)
 	for _, bullet := range g.bullets {
 		if bullet.active && bullet.pos.Y >= 0 && bullet.pos.Y < g.height {
 			board[bullet.pos.Y][bullet.pos.X] = '|'
@@ -376,18 +521,18 @@ const (
 )
 
 type model struct {
-	game            *Game
-	paused          bool
-	width           int
-	height          int
-	state           gameState
-	flashOn         bool
-	spacePressed    bool
-	lastShot        time.Time
-	highScores      []HighScore
-	playerName      string
-	enteringName    bool
-	scoreSaved      bool
+	game         *Game
+	paused       bool
+	width        int
+	height       int
+	state        gameState
+	flashOn      bool
+	spacePressed bool
+	lastShot     time.Time
+	highScores   []HighScore
+	playerName   string
+	enteringName bool
+	scoreSaved   bool
 }
 
 // Styles
@@ -423,6 +568,12 @@ var (
 
 	bulletStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("11"))
+
+	flyStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208"))
+
+	explosionStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("196"))
 
 	statsStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("86")).
@@ -465,7 +616,7 @@ func tickCmd() tea.Cmd {
 }
 
 func shootTickCmd() tea.Cmd {
-	return tea.Tick(time.Millisecond*500, func(t time.Time) tea.Msg {
+	return tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg {
 		return shootMsg(t)
 	})
 }
@@ -546,13 +697,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case shootMsg:
-		// Rapid fire when holding space (2 shots per second)
+		// Rapid fire when holding space - now shoots MANY bullets!
 		if m.spacePressed && m.state == playingGame && !m.paused {
-			now := time.Now()
-			if now.Sub(m.lastShot) >= time.Millisecond*500 {
-				m.game.Shoot()
-				m.lastShot = now
-			}
+			m.game.Shoot()
 		}
 		return m, shootTickCmd()
 
@@ -616,6 +763,12 @@ func (m model) View() string {
 				char = mushroomStyle.Render(char)
 			case '|': // Bullets
 				char = bulletStyle.Render(char)
+			case '✺': // Fly
+				char = flyStyle.Render(char)
+			case '~': // Wing trail (darker)
+				char = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(char)
+			case '✶', '✸', '✹': // Explosions
+				char = explosionStyle.Render(char)
 			}
 			boardStr += char
 		}
@@ -625,14 +778,27 @@ func (m model) View() string {
 	boardStr += "└" + lipgloss.NewStyle().Foreground(lipgloss.Color("62")).Render(
 		lipgloss.PlaceHorizontal(len(board[0]), lipgloss.Center, "")) + "┘"
 
-	// Stats
+	// Stats with active flies count
+	activeBullets := 0
+	for _, b := range m.game.bullets {
+		if b.active {
+			activeBullets++
+		}
+	}
+	activeFlies := 0
+	for _, f := range m.game.flies {
+		if f.active {
+			activeFlies++
+		}
+	}
+
 	stats := statsStyle.Render(fmt.Sprintf(
-		"Score: %d  |  Level: %d  |  Segments: %d  |  Mushrooms: %d",
-		m.game.score, m.game.level, len(m.game.segments), len(m.game.mushrooms)))
+		"Score: %d  |  Bullets: %d  |  Segments: %d  |  Flies: %d",
+		m.game.score, activeBullets, len(m.game.segments), activeFlies))
 
 	// Controls
 	controls := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(
-		"[←→ or A/D] Move  [↑↓ or W/S] Up/Down  [Space] Shoot  [P] Pause  [Q] Quit")
+		"[←→ or A/D] Move  [↑↓ or W/S] Up/Down  [Space] RAPID FIRE!  [P] Pause  [Q] Quit")
 
 	// Status messages
 	status := ""
@@ -683,7 +849,7 @@ func (m model) renderSplash() string {
         ║    ●                                  ║
         ║    ┃                                  ║
         ║                                       ║
-        ║    ✺   Fly                            ║
+        ║    ✺~.  Fly (200 pts!)                ║
         ╚═══════════════════════════════════════╝
 `)
 
