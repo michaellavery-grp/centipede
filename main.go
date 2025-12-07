@@ -6,11 +6,16 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
+
+const highScoreFile = "highscores.txt"
 
 // Game entity positions
 type Position struct {
@@ -48,6 +53,12 @@ type Segment struct {
 type Mushroom struct {
 	pos    Position
 	health int // 0-4 hits to destroy
+}
+
+// High Score entry
+type HighScore struct {
+	Name  string
+	Score int
 }
 
 // Game state
@@ -298,14 +309,85 @@ func (g *Game) GetBoard() [][]rune {
 	return board
 }
 
+// High Score Management
+func loadHighScores() []HighScore {
+	scores := []HighScore{}
+	data, err := os.ReadFile(highScoreFile)
+	if err != nil {
+		return scores // Return empty if file doesn't exist
+	}
+
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, ",")
+		if len(parts) == 2 {
+			score, err := strconv.Atoi(parts[1])
+			if err == nil {
+				scores = append(scores, HighScore{Name: parts[0], Score: score})
+			}
+		}
+	}
+
+	// Sort by score descending
+	sort.Slice(scores, func(i, j int) bool {
+		return scores[i].Score > scores[j].Score
+	})
+
+	return scores
+}
+
+func saveHighScore(name string, score int) error {
+	scores := loadHighScores()
+	scores = append(scores, HighScore{Name: name, Score: score})
+
+	// Sort by score descending
+	sort.Slice(scores, func(i, j int) bool {
+		return scores[i].Score > scores[j].Score
+	})
+
+	// Keep top 10
+	if len(scores) > 10 {
+		scores = scores[:10]
+	}
+
+	// Write to file
+	var lines []string
+	for _, s := range scores {
+		lines = append(lines, fmt.Sprintf("%s,%d", s.Name, s.Score))
+	}
+
+	return os.WriteFile(highScoreFile, []byte(strings.Join(lines, "\n")), 0644)
+}
+
 // Bubble Tea Model
 type tickMsg time.Time
+type shootMsg time.Time
+
+type gameState int
+
+const (
+	splashScreen gameState = iota
+	playingGame
+	gameOverScreen
+)
 
 type model struct {
-	game   *Game
-	paused bool
-	width  int
-	height int
+	game            *Game
+	paused          bool
+	width           int
+	height          int
+	state           gameState
+	flashOn         bool
+	spacePressed    bool
+	lastShot        time.Time
+	highScores      []HighScore
+	playerName      string
+	enteringName    bool
+	scoreSaved      bool
 }
 
 // Styles
@@ -314,6 +396,18 @@ var (
 			Bold(true).
 			Foreground(lipgloss.Color("205")).
 			MarginBottom(1)
+
+	splashTitleStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("10"))
+
+	flashStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("11"))
+
+	highScoreStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("14")).
+			Bold(true)
 
 	playerStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("10"))
@@ -329,10 +423,6 @@ var (
 
 	bulletStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("11"))
-
-	borderStyle = lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("62"))
 
 	statsStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("86")).
@@ -353,13 +443,17 @@ var (
 
 func initialModel() model {
 	return model{
-		game: NewGame(50, 28),
+		game:       NewGame(50, 28),
+		state:      splashScreen,
+		highScores: loadHighScores(),
+		lastShot:   time.Now(),
 	}
 }
 
 func (m model) Init() tea.Cmd {
 	return tea.Batch(
 		tickCmd(),
+		shootTickCmd(),
 		tea.EnterAltScreen,
 	)
 }
@@ -370,6 +464,12 @@ func tickCmd() tea.Cmd {
 	})
 }
 
+func shootTickCmd() tea.Cmd {
+	return tea.Tick(time.Millisecond*500, func(t time.Time) tea.Msg {
+		return shootMsg(t)
+	})
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -377,39 +477,120 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 	case tea.KeyMsg:
+		// Handle splash screen
+		if m.state == splashScreen {
+			m.state = playingGame
+			return m, nil
+		}
+
+		// Handle name entry
+		if m.enteringName {
+			switch msg.String() {
+			case "enter":
+				if m.playerName != "" {
+					saveHighScore(m.playerName, m.game.score)
+					m.highScores = loadHighScores()
+					m.scoreSaved = true
+					m.enteringName = false
+				}
+			case "backspace":
+				if len(m.playerName) > 0 {
+					m.playerName = m.playerName[:len(m.playerName)-1]
+				}
+			default:
+				if len(msg.String()) == 1 && len(m.playerName) < 10 {
+					m.playerName += msg.String()
+				}
+			}
+			return m, nil
+		}
+
+		// Handle game controls
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "left", "a":
-			m.game.MovePlayer(-1)
+			if m.state == playingGame {
+				m.game.MovePlayer(-1)
+			}
 		case "right", "d":
-			m.game.MovePlayer(1)
+			if m.state == playingGame {
+				m.game.MovePlayer(1)
+			}
 		case "up", "w":
-			m.game.MovePlayerY(-1)
+			if m.state == playingGame {
+				m.game.MovePlayerY(-1)
+			}
 		case "down", "s":
-			m.game.MovePlayerY(1)
-		case "space":
-			m.game.Shoot()
+			if m.state == playingGame {
+				m.game.MovePlayerY(1)
+			}
+		case " ": // Spacebar
+			if m.state == playingGame {
+				m.spacePressed = true
+				m.game.Shoot()
+			}
 		case "p":
-			m.paused = !m.paused
+			if m.state == playingGame {
+				m.paused = !m.paused
+			}
 		case "r":
 			// Restart game
 			if m.game.gameOver || m.game.won {
 				m.game = NewGame(50, 28)
+				m.state = playingGame
+				m.enteringName = false
+				m.scoreSaved = false
+				m.playerName = ""
 			}
 		}
 
+	case shootMsg:
+		// Rapid fire when holding space (2 shots per second)
+		if m.spacePressed && m.state == playingGame && !m.paused {
+			now := time.Now()
+			if now.Sub(m.lastShot) >= time.Millisecond*500 {
+				m.game.Shoot()
+				m.lastShot = now
+			}
+		}
+		return m, shootTickCmd()
+
 	case tickMsg:
-		if !m.paused {
+		// Flash "Press any key" message
+		m.flashOn = !m.flashOn
+
+		if m.state == playingGame && !m.paused {
 			m.game.Update()
+
+			// Check if game ended and score is high enough
+			if (m.game.gameOver || m.game.won) && !m.scoreSaved && !m.enteringName {
+				scores := m.highScores
+				if len(scores) < 10 || m.game.score > scores[len(scores)-1].Score {
+					m.enteringName = true
+				}
+			}
 		}
 		return m, tickCmd()
+	}
+
+	// Reset space key when released (key up events)
+	if _, ok := msg.(tea.KeyMsg); ok {
+		m.spacePressed = false
 	}
 
 	return m, nil
 }
 
 func (m model) View() string {
+	if m.state == splashScreen {
+		return m.renderSplash()
+	}
+
+	if m.enteringName {
+		return m.renderNameEntry()
+	}
+
 	board := m.game.GetBoard()
 
 	// Title
@@ -477,6 +658,91 @@ func (m model) View() string {
 		stats,
 		controls,
 		status,
+	)
+}
+
+func (m model) renderSplash() string {
+	centipede := splashTitleStyle.Render(`
+   _____ ______ _   _ _______ _____ _____  ______ _____  ______
+  / ____|  ____| \ | |__   __|_   _|  __ \|  ____|  __ \|  ____|
+ | |    | |__  |  \| |  | |    | | | |__) | |__  | |  | | |__
+ | |    |  __| | . \ |  | |    | | |  ___/|  __| | |  | |  __|
+ | |____| |____| |\  |  | |   _| |_| |    | |____| |__| | |____
+  \_____|______|_| \_|  |_|  |_____|_|    |______|_____/|______|
+`)
+
+	worm := lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Render(`
+        ╔═══════════════════════════════════════╗
+        ║    @OOOOOOOOOOOOOO    Green Worm     ║
+        ║                                       ║
+        ║    ╱╲  ╱╲  ╱╲                        ║
+        ║   ╱  ╲╱  ╲╱  ╲       Spider          ║
+        ║  ╱    ╲    ╲  ╲                      ║
+        ║                                       ║
+        ║    ┃                 Flea             ║
+        ║    ●                                  ║
+        ║    ┃                                  ║
+        ║                                       ║
+        ║    ✺   Fly                            ║
+        ╚═══════════════════════════════════════╝
+`)
+
+	// High scores
+	highScoreTitle := highScoreStyle.Render("\n═══ HIGH SCORES ═══\n")
+	var scoreLines []string
+	for i, score := range m.highScores {
+		if i >= 10 {
+			break
+		}
+		scoreLines = append(scoreLines,
+			lipgloss.NewStyle().Foreground(lipgloss.Color("14")).Render(
+				fmt.Sprintf("%2d. %-10s  %6d", i+1, score.Name, score.Score)))
+	}
+	highScoreList := strings.Join(scoreLines, "\n")
+
+	// Flashing "Press any key"
+	pressKey := ""
+	if m.flashOn {
+		pressKey = flashStyle.Render("\n\n>>> PRESS ANY KEY TO CONTINUE <<<")
+	} else {
+		pressKey = "\n\n                                  "
+	}
+
+	return lipgloss.JoinVertical(
+		lipgloss.Center,
+		centipede,
+		worm,
+		highScoreTitle,
+		highScoreList,
+		pressKey,
+	)
+}
+
+func (m model) renderNameEntry() string {
+	title := gameOverStyle.Render("NEW HIGH SCORE!")
+	scoreText := statsStyle.Render(fmt.Sprintf("Your Score: %d", m.game.score))
+	prompt := lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render(
+		"Enter your name (max 10 chars):")
+	nameDisplay := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("10")).
+		Bold(true).
+		Render(m.playerName + "_")
+	instruction := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(
+		"Press [Enter] to save")
+
+	return lipgloss.JoinVertical(
+		lipgloss.Center,
+		"",
+		"",
+		"",
+		title,
+		"",
+		scoreText,
+		"",
+		prompt,
+		nameDisplay,
+		"",
+		instruction,
 	)
 }
 

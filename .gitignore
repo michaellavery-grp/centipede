@@ -20,6 +20,9 @@ go.work
 # Built executable
 centipede
 
+# High scores (user data)
+highscores.txt
+
 # IDE
 .vscode/
 .idea/

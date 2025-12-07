@@ -8,11 +8,14 @@ A terminal-based clone of the classic arcade game Centipede, built with [Bubble 
 
 ## 🎮 Features
 
+- **Splash Screen**: ASCII art title with green worm, spider, flea, and fly characters
+- **High Score System**: Top 10 high scores saved to `highscores.txt` with name entry
+- **Flashing Messages**: Animated "Press any key to continue" on splash screen
 - **Classic Centipede Gameplay**: Shoot the descending centipede segments as they zigzag down the screen
 - **Mushroom Obstacles**: Destroyable mushrooms (4 hits) that affect centipede movement
 - **Smart Falling Mechanics**: Centipedes drop down and reverse direction when hitting edges or mushrooms
 - **Player Movement**: Full directional control in the bottom quarter of the screen
-- **Bullet System**: Fire up to 2 bullets at once
+- **Rapid Fire Bullets**: Hold spacebar to fire 2 bullets per second (max 2 on screen)
 - **Scoring System**:
   - Body segment: 10 points
   - Head segment: 100 points
@@ -60,23 +63,29 @@ go run main.go
 
 | Key | Action |
 |-----|--------|
+| `Any Key` | Start game (from splash screen) |
 | `←` / `→` or `A` / `D` | Move left/right |
 | `↑` / `↓` or `W` / `S` | Move up/down (in player area) |
-| `Space` | Shoot |
+| `Space` | Shoot (tap) or Rapid Fire (hold = 2/sec) |
 | `P` | Pause/Unpause |
 | `R` | Restart (after game over/win) |
 | `Q` or `Ctrl+C` | Quit |
+| `Letters` | Enter name (high score screen) |
+| `Enter` | Submit name (high score screen) |
 
 ## 🎯 How to Play
 
-1. **Objective**: Destroy all centipede segments before they reach the bottom
-2. **Strategy**:
+1. **Start**: Press any key on the splash screen to begin
+2. **Objective**: Destroy all centipede segments before they reach the bottom
+3. **Strategy**:
    - Aim for the head (@) for bonus points (100 vs 10)
+   - Hold spacebar for rapid fire (2 bullets/second)
    - Destroy mushrooms to create clear lanes
    - Use vertical movement to dodge and position
    - Watch centipede drop patterns when hitting obstacles
-3. **Game Over**: Centipede reaches the player area (bottom 3 rows)
-4. **Victory**: Destroy all 10 segments
+4. **Game Over**: Centipede reaches the player area (bottom 3 rows)
+5. **Victory**: Destroy all 10 segments
+6. **High Score**: Enter your name if you make the top 10!
 
 ## 🏗️ Technical Details
 
@@ -99,7 +108,10 @@ The game follows the **Elm Architecture** pattern used by Bubble Tea:
 - Tick rate: 80ms (~12.5 FPS)
 - Centipede movement: 1 cell per tick
 - Bullet speed: 1 cell upward per tick
+- Rapid fire rate: 500ms (2 bullets/second when holding space)
 - Collision detection: Position-based (X, Y matching)
+- Splash screen: Flashing text at tick rate
+- High scores: Saved to `highscores.txt` (CSV format: Name,Score)
 
 ### Code Structure
 
@@ -110,10 +122,15 @@ main.go
 ├── Bullet struct           // Active bullets with position
 ├── Segment struct          // Centipede segments (head/body)
 ├── Mushroom struct         // Obstacles with health (1-4)
+├── HighScore struct        // Name and score
 ├── Game struct             // Main game state
-├── model struct            // Bubble Tea model
-├── Update() methods        // Game logic
+├── model struct            // Bubble Tea model with game states
+├── loadHighScores()        // Read from highscores.txt
+├── saveHighScore()         // Write to highscores.txt
+├── Update() methods        // Game logic + rapid fire
 ├── View() method           // Terminal rendering
+├── renderSplash()          // Splash screen with ASCII art
+├── renderNameEntry()       // High score name entry
 └── main()                  // Entry point
 ```
 
@@ -139,14 +156,17 @@ Score: 120  |  Level: 1  |  Segments: 7  |  Mushrooms: 12
 Potential additions for future versions:
 
 - [ ] Multiple levels with increasing difficulty
-- [ ] Additional enemies (Spider, Flea, Scorpion)
+- [ ] Additional enemies (Spider, Flea, Scorpion) - currently shown on splash
 - [ ] Lives system with respawn
-- [ ] High score tracking
+- [x] High score tracking (DONE!)
+- [x] Splash screen with ASCII art (DONE!)
+- [x] Rapid fire bullets (DONE!)
 - [ ] Sound effects (terminal bell)
 - [ ] Configuration file (TOML)
 - [ ] Centipede segment splitting when hit mid-body
 - [ ] Speed increases as segments are destroyed
 - [ ] Mushroom regeneration between levels
+- [ ] Online leaderboard
 
 ## 🐛 Known Issues
 
