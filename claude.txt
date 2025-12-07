@@ -1,0 +1,984 @@
+# Building Centipede with Bubble Tea: A Complete Guide
+
+## Table of Contents
+
+1. [Bubble Tea Framework Overview](#bubble-tea-framework-overview)
+1. [Tetrigo Analysis](#tetrigo-analysis)
+1. [Centipede Game Design](#centipede-game-design)
+1. [Architecture for Centipede](#architecture-for-centipede)
+1. [Implementation Strategy](#implementation-strategy)
+1. [Code Examples](#code-examples)
+
+-----
+
+## Bubble Tea Framework Overview
+
+### What is Bubble Tea?
+
+**Bubble Tea** (`github.com/charmbracelet/bubbletea`) is a TUI (Terminal User Interface) framework for Go based on The Elm Architecture. It provides a functional, event-driven approach to building terminal applications.
+
+### Core Concepts
+
+The framework revolves around three main components:
+
+#### 1. **Model** - Application State
+
+The model holds all of your application’s state.
+
+```go
+type model struct {
+    // Your game state here
+    player Position
+    enemies []Enemy
+    score   int
+    // ... etc
+}
+```
+
+#### 2. **Update** - Message Handler
+
+The Update function handles messages (events) and returns an updated model.
+
+```go
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+    switch msg := msg.(type) {
+    case tea.KeyMsg:
+        // Handle keyboard input
+    case tickMsg:
+        // Handle game tick/animation
+    }
+    return m, nil
+}
+```
+
+#### 3. **View** - Renderer
+
+The View function renders your model as a string that becomes your UI.
+
+```go
+func (m model) View() string {
+    // Build and return your terminal display
+    return "Your game rendered as a string\n"
+}
+```
+
+### Key Features for Games
+
+- **Frame-rate based rendering**: Set custom FPS (up to 120)
+- **Keyboard input handling**: Full keyboard event support
+- **Mouse support**: Optional mouse events
+- **Window size detection**: Responds to terminal resizing
+- **Alternate screen buffer**: Full-screen terminal control
+- **Command system**: For async operations (timers, network, etc.)
+
+### Related Libraries
+
+- **Bubbles**: Pre-built components (progress bars, spinners, text inputs)
+- **Lip Gloss**: Styling and layout (colors, borders, alignment)
+- **Harmonica**: Spring-based animation
+- **BubbleZone**: Mouse event tracking
+
+-----
+
+## Tetrigo Analysis
+
+### Project Structure
+
+Tetrigo provides an excellent reference for structuring a game in Bubble Tea. Here’s the architecture:
+
+```
+tetrigo/
+├── cmd/tetrigo/              # TUI application entry point
+│   ├── main.go
+│   └── tui/                  # Bubble Tea components
+│       ├── model.go
+│       ├── update.go
+│       ├── view.go
+│       └── components/
+├── pkg/tetris/               # Core game logic (framework-agnostic)
+│   ├── matrix.go
+│   ├── mino.go
+│   ├── scoring.go
+│   └── modes/                # Different game modes
+│       ├── marathon/
+│       └── sprint/
+└── internal/                 # Internal utilities
+    ├── config/
+    └── storage/
+```
+
+### Key Design Decisions
+
+1. **Separation of Concerns**
+- Core game logic is completely independent of the UI
+- TUI code only handles display and input translation
+- Game state management is isolated
+1. **Command Pattern for Timing**
+   
+   ```go
+   // Tetrigo uses commands for game ticks
+   func tickCmd() tea.Cmd {
+       return tea.Tick(time.Millisecond*16, func(t time.Time) tea.Msg {
+           return tickMsg(t)
+       })
+   }
+   ```
+1. **Configuration System**
+- TOML config files for settings
+- Command-line flags for quick options
+- XDG-compliant file locations
+1. **Data Persistence**
+- SQLite for scores/leaderboards
+- Proper XDG data directory usage
+
+### TUI Implementation Patterns
+
+#### Model Structure
+
+```go
+type Model struct {
+    game      *tetris.Game       // Core game engine
+    width     int                // Terminal width
+    height    int                // Terminal height
+    paused    bool
+    gameOver  bool
+}
+```
+
+#### Update Pattern
+
+```go
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+    switch msg := msg.(type) {
+    case tea.KeyMsg:
+        return m.handleKeyPress(msg)
+    case tickMsg:
+        return m.handleTick()
+    case tea.WindowSizeMsg:
+        m.width = msg.Width
+        m.height = msg.Height
+    }
+    return m, nil
+}
+```
+
+#### View Pattern
+
+```go
+func (m Model) View() string {
+    var b strings.Builder
+    
+    // Render game board
+    b.WriteString(m.renderBoard())
+    
+    // Render score, info
+    b.WriteString(m.renderStats())
+    
+    // Render help text
+    b.WriteString(m.renderHelp())
+    
+    return b.String()
+}
+```
+
+-----
+
+## Centipede Game Design
+
+### Game Overview
+
+Centipede is a classic arcade shooter where:
+
+- Player controls a ship at the bottom of the screen
+- Centipede moves down the screen in a zigzag pattern
+- Player shoots bullets upward to destroy centipede segments
+- Mushrooms act as obstacles
+- Spider, flea, and scorpion appear as additional enemies
+
+### Core Game Elements
+
+#### 1. **Player**
+
+- Position (X, Y)
+- Limited movement area (bottom portion of screen)
+- Can shoot bullets upward
+- One life (or multiple depending on mode)
+
+#### 2. **Centipede**
+
+- Made of connected segments (typically 10-12)
+- Moves horizontally until hitting edge or mushroom
+- Drops down one row and reverses direction
+- When shot, splits into two independent centipedes
+- Speeds up as segments are destroyed
+
+#### 3. **Bullets**
+
+- Travel upward from player
+- Destroy centipede segments
+- Destroy mushrooms (after multiple hits)
+- Only 1-2 bullets on screen at once
+
+#### 4. **Mushrooms**
+
+- Scattered across playfield
+- Block both player and centipede
+- Take 4 hits to destroy
+- Regenerate between waves
+
+#### 5. **Other Enemies**
+
+- **Spider**: Moves diagonally, destroys mushrooms
+- **Flea**: Drops down screen, creates mushrooms
+- **Scorpion**: Moves horizontally, poisons mushrooms
+
+### Game Mechanics
+
+#### Movement Logic
+
+```
+Centipede movement:
+1. Move in current direction
+2. If at edge or mushroom:
+   - Move down one row
+   - Reverse direction
+3. If at bottom of player area:
+   - Move toward player
+```
+
+#### Collision Detection
+
+- Bullet vs Centipede segment
+- Bullet vs Mushroom
+- Player vs Enemy
+- Centipede vs Mushroom/Edge
+
+#### Scoring
+
+- Centipede segment: 10 points
+- Centipede head: 100 points
+- Spider: 300/600/900 (distance-based)
+- Flea: 200 points
+- Scorpion: 1000 points
+- Mushroom: 1 point per hit, 4 points when destroyed
+
+-----
+
+## Architecture for Centipede
+
+### Project Structure
+
+```
+centipede/
+├── cmd/centipede/
+│   └── main.go
+├── internal/
+│   ├── tui/                      # Bubble Tea UI
+│   │   ├── model.go
+│   │   ├── update.go
+│   │   ├── view.go
+│   │   ├── keys.go               # Key bindings
+│   │   ├── styles.go             # Lipgloss styles
+│   │   └── components/
+│   │       ├── game_board.go
+│   │       ├── score_display.go
+│   │       └── menu.go
+│   ├── config/
+│   │   └── config.go
+│   └── storage/
+│       └── storage.go
+├── pkg/game/                     # Core game engine
+│   ├── game.go                   # Main game controller
+│   ├── entity.go                 # Base entity interface
+│   ├── player.go
+│   ├── centipede.go
+│   ├── bullet.go
+│   ├── mushroom.go
+│   ├── spider.go
+│   ├── flea.go
+│   ├── scorpion.go
+│   ├── collision.go
+│   ├── score.go
+│   └── constants.go
+└── go.mod
+```
+
+### Core Interfaces
+
+```go
+// pkg/game/entity.go
+type Entity interface {
+    Position() (int, int)
+    Update() error
+    IsActive() bool
+    Char() rune
+}
+
+// pkg/game/game.go
+type Game struct {
+    width       int
+    height      int
+    player      *Player
+    centipedes  []*Centipede
+    bullets     []*Bullet
+    mushrooms   []*Mushroom
+    enemies     []Entity
+    score       int
+    level       int
+    gameOver    bool
+}
+
+func (g *Game) Update() error {
+    // Update all entities
+    // Check collisions
+    // Handle game logic
+}
+
+func (g *Game) GetBoard() [][]rune {
+    // Return current game board state for rendering
+}
+```
+
+### TUI Model
+
+```go
+// internal/tui/model.go
+type Model struct {
+    game        *game.Game
+    width       int
+    height      int
+    
+    // UI state
+    paused      bool
+    showHelp    bool
+    menu        bool
+    
+    // Timing
+    lastTick    time.Time
+    tickRate    time.Duration
+}
+
+func (m Model) Init() tea.Cmd {
+    return tea.Batch(
+        tickCmd(m.tickRate),
+        tea.EnterAltScreen,
+    )
+}
+```
+
+-----
+
+## Implementation Strategy
+
+### Phase 1: Core Game Engine (pkg/game/)
+
+1. **Start with basic types**
+   
+   ```go
+   type Position struct {
+       X, Y int
+   }
+   
+   type Player struct {
+       pos     Position
+       active  bool
+   }
+   ```
+1. **Implement Player movement and shooting**
+   
+   ```go
+   func (p *Player) MoveLeft() { p.pos.X-- }
+   func (p *Player) MoveRight() { p.pos.X++ }
+   func (p *Player) Shoot() *Bullet { ... }
+   ```
+1. **Create Centipede segment**
+   
+   ```go
+   type Segment struct {
+       pos       Position
+       direction Direction
+       speed     int
+   }
+   
+   type Centipede struct {
+       segments  []*Segment
+       length    int
+   }
+   ```
+1. **Implement basic collision detection**
+   
+   ```go
+   func checkCollision(e1, e2 Entity) bool {
+       x1, y1 := e1.Position()
+       x2, y2 := e2.Position()
+       return x1 == x2 && y1 == y2
+   }
+   ```
+1. **Add Mushrooms**
+   
+   ```go
+   type Mushroom struct {
+       pos    Position
+       health int  // 0-4 hits
+   }
+   ```
+
+### Phase 2: Game Loop
+
+```go
+func (g *Game) Update() error {
+    if g.gameOver {
+        return nil
+    }
+    
+    // Update all entities
+    for _, c := range g.centipedes {
+        c.Update()
+    }
+    
+    for _, b := range g.bullets {
+        b.Update()
+    }
+    
+    // Check collisions
+    g.checkBulletCollisions()
+    g.checkPlayerCollisions()
+    
+    // Spawn new enemies if needed
+    if g.shouldSpawnFlea() {
+        g.spawnFlea()
+    }
+    
+    // Check win/loss conditions
+    if len(g.centipedes) == 0 {
+        g.nextLevel()
+    }
+    
+    return nil
+}
+```
+
+### Phase 3: Bubble Tea Integration
+
+1. **Create TUI model**
+   
+   ```go
+   func NewModel() Model {
+       game := game.New(40, 30)  // width, height
+       
+       return Model{
+           game:     game,
+           tickRate: time.Millisecond * 50,  // 20 FPS
+       }
+   }
+   ```
+1. **Handle keyboard input**
+   
+   ```go
+   func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+       switch msg := msg.(type) {
+       case tea.KeyMsg:
+           switch msg.String() {
+           case "left", "a":
+               m.game.MovePlayerLeft()
+           case "right", "d":
+               m.game.MovePlayerRight()
+           case "space":
+               m.game.PlayerShoot()
+           case "p":
+               m.paused = !m.paused
+           case "q", "ctrl+c":
+               return m, tea.Quit
+           }
+           
+       case tickMsg:
+           if !m.paused {
+               m.game.Update()
+           }
+           return m, tickCmd(m.tickRate)
+           
+       case tea.WindowSizeMsg:
+           m.width = msg.Width
+           m.height = msg.Height
+       }
+       
+       return m, nil
+   }
+   ```
+1. **Render the game**
+   
+   ```go
+   func (m Model) View() string {
+       if m.menu {
+           return m.renderMenu()
+       }
+       
+       var b strings.Builder
+       
+       // Get game board
+       board := m.game.GetBoard()
+       
+       // Render board with borders
+       b.WriteString("┌" + strings.Repeat("─", len(board[0])) + "┐\n")
+       for _, row := range board {
+           b.WriteString("│")
+           for _, cell := range row {
+               b.WriteRune(cell)
+           }
+           b.WriteString("│\n")
+       }
+       b.WriteString("└" + strings.Repeat("─", len(board[0])) + "┘\n")
+       
+       // Render score and stats
+       b.WriteString(fmt.Sprintf("\nScore: %d  Level: %d  Lives: %d\n",
+           m.game.Score(), m.game.Level(), m.game.Lives()))
+       
+       // Render help text
+       b.WriteString("\n[A/D] Move  [Space] Shoot  [P] Pause  [Q] Quit")
+       
+       return b.String()
+   }
+   ```
+
+### Phase 4: Polish and Features
+
+1. **Add Lip Gloss styling**
+   
+   ```go
+   import "github.com/charmbracelet/lipgloss"
+   
+   var (
+       playerStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+       centipedeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("13"))
+       mushroomStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+       bulletStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+   )
+   ```
+1. **Add configuration system**
+   
+   ```go
+   type Config struct {
+       Keys struct {
+           MoveLeft    []string `toml:"move_left"`
+           MoveRight   []string `toml:"move_right"`
+           Shoot       []string `toml:"shoot"`
+           Pause       []string `toml:"pause"`
+       } `toml:"keys"`
+       
+       Game struct {
+           StartLevel  int     `toml:"start_level"`
+           Lives       int     `toml:"lives"`
+           Difficulty  string  `toml:"difficulty"`
+       } `toml:"game"`
+   }
+   ```
+1. **Add high score tracking**
+   
+   ```go
+   // Using SQLite like Tetrigo
+   type Storage struct {
+       db *sql.DB
+   }
+   
+   func (s *Storage) SaveScore(name string, score int, level int) error {
+       // Insert into database
+   }
+   
+   func (s *Storage) GetHighScores(limit int) ([]Score, error) {
+       // Query top scores
+   }
+   ```
+
+-----
+
+## Code Examples
+
+### Complete Minimal Example
+
+Here’s a minimal but complete Centipede implementation to get started:
+
+```go
+// main.go
+package main
+
+import (
+    "fmt"
+    "os"
+    "time"
+
+    tea "github.com/charmbracelet/bubbletea"
+)
+
+// Game entity positions
+type Position struct {
+    X, Y int
+}
+
+// Player
+type Player struct {
+    pos Position
+}
+
+// Bullet
+type Bullet struct {
+    pos    Position
+    active bool
+}
+
+func (b *Bullet) Update() {
+    if b.active {
+        b.pos.Y--
+        if b.pos.Y < 0 {
+            b.active = false
+        }
+    }
+}
+
+// Centipede Segment
+type Segment struct {
+    pos       Position
+    direction int // 1 = right, -1 = left
+}
+
+// Game state
+type Game struct {
+    width      int
+    height     int
+    player     Player
+    segments   []Segment
+    bullets    []Bullet
+    score      int
+}
+
+func NewGame(width, height int) *Game {
+    g := &Game{
+        width:  width,
+        height: height,
+        player: Player{pos: Position{X: width / 2, Y: height - 2}},
+    }
+    
+    // Create initial centipede at top
+    for i := 0; i < 10; i++ {
+        g.segments = append(g.segments, Segment{
+            pos:       Position{X: 5 + i, Y: 2},
+            direction: 1,
+        })
+    }
+    
+    return g
+}
+
+func (g *Game) Update() {
+    // Update bullets
+    for i := range g.bullets {
+        g.bullets[i].Update()
+    }
+    
+    // Update centipede segments
+    for i := range g.segments {
+        seg := &g.segments[i]
+        seg.pos.X += seg.direction
+        
+        // Hit edge
+        if seg.pos.X <= 0 || seg.pos.X >= g.width-1 {
+            seg.pos.Y++
+            seg.direction *= -1
+        }
+    }
+    
+    // Check collisions
+    for i := range g.bullets {
+        if !g.bullets[i].active {
+            continue
+        }
+        
+        for j := range g.segments {
+            if g.bullets[i].pos.X == g.segments[j].pos.X &&
+               g.bullets[i].pos.Y == g.segments[j].pos.Y {
+                g.bullets[i].active = false
+                // Remove segment
+                g.segments = append(g.segments[:j], g.segments[j+1:]...)
+                g.score += 10
+                break
+            }
+        }
+    }
+}
+
+func (g *Game) MovePlayer(dx int) {
+    newX := g.player.pos.X + dx
+    if newX > 0 && newX < g.width-1 {
+        g.player.pos.X = newX
+    }
+}
+
+func (g *Game) Shoot() {
+    // Only allow 2 bullets on screen
+    activeBullets := 0
+    for _, b := range g.bullets {
+        if b.active {
+            activeBullets++
+        }
+    }
+    
+    if activeBullets < 2 {
+        g.bullets = append(g.bullets, Bullet{
+            pos:    Position{X: g.player.pos.X, Y: g.player.pos.Y - 1},
+            active: true,
+        })
+    }
+}
+
+func (g *Game) GetBoard() [][]rune {
+    board := make([][]rune, g.height)
+    for i := range board {
+        board[i] = make([]rune, g.width)
+        for j := range board[i] {
+            board[i][j] = ' '
+        }
+    }
+    
+    // Draw player
+    board[g.player.pos.Y][g.player.pos.X] = 'A'
+    
+    // Draw segments
+    for _, seg := range g.segments {
+        if seg.pos.Y >= 0 && seg.pos.Y < g.height &&
+           seg.pos.X >= 0 && seg.pos.X < g.width {
+            board[seg.pos.Y][seg.pos.X] = 'O'
+        }
+    }
+    
+    // Draw bullets
+    for _, bullet := range g.bullets {
+        if bullet.active && bullet.pos.Y >= 0 && bullet.pos.Y < g.height {
+            board[bullet.pos.Y][bullet.pos.X] = '|'
+        }
+    }
+    
+    return board
+}
+
+// Bubble Tea Model
+type tickMsg time.Time
+
+type model struct {
+    game     *Game
+    paused   bool
+}
+
+func initialModel() model {
+    return model{
+        game: NewGame(40, 25),
+    }
+}
+
+func (m model) Init() tea.Cmd {
+    return tickCmd()
+}
+
+func tickCmd() tea.Cmd {
+    return tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg {
+        return tickMsg(t)
+    })
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+    switch msg := msg.(type) {
+    case tea.KeyMsg:
+        switch msg.String() {
+        case "q", "ctrl+c":
+            return m, tea.Quit
+        case "left", "a":
+            m.game.MovePlayer(-1)
+        case "right", "d":
+            m.game.MovePlayer(1)
+        case "space":
+            m.game.Shoot()
+        case "p":
+            m.paused = !m.paused
+        }
+        
+    case tickMsg:
+        if !m.paused {
+            m.game.Update()
+        }
+        return m, tickCmd()
+    }
+    
+    return m, nil
+}
+
+func (m model) View() string {
+    board := m.game.GetBoard()
+    
+    var s string
+    
+    // Draw top border
+    s += "┌" + "─────────────────────────────────────────" + "┐\n"
+    
+    // Draw board
+    for _, row := range board {
+        s += "│"
+        for _, cell := range row {
+            s += string(cell)
+        }
+        s += "│\n"
+    }
+    
+    // Draw bottom border
+    s += "└" + "─────────────────────────────────────────" + "┘\n"
+    
+    // Stats
+    s += fmt.Sprintf("\nScore: %d  Segments: %d\n", 
+        m.game.score, len(m.game.segments))
+    
+    // Controls
+    s += "\n[A/D] Move  [Space] Shoot  [P] Pause  [Q] Quit\n"
+    
+    if m.paused {
+        s += "\n=== PAUSED ===\n"
+    }
+    
+    if len(m.game.segments) == 0 {
+        s += "\n=== YOU WIN! ===\n"
+    }
+    
+    return s
+}
+
+func main() {
+    p := tea.NewProgram(
+        initialModel(),
+        tea.WithAltScreen(),
+    )
+    
+    if _, err := p.Run(); err != nil {
+        fmt.Printf("Error: %v", err)
+        os.Exit(1)
+    }
+}
+```
+
+### Running the Example
+
+1. Create a new Go module:
+
+```bash
+mkdir centipede
+cd centipede
+go mod init github.com/michaellavery-grp/centipede
+```
+
+1. Add dependencies:
+
+```bash
+go get github.com/charmbracelet/bubbletea
+```
+
+1. Save the code as `main.go` and run:
+
+```bash
+go run main.go
+```
+
+-----
+
+## Next Steps and Enhancements
+
+### Essential Features to Add
+
+1. **Mushrooms**
+- Random placement at start
+- Regeneration between levels
+- Health tracking (4 hits to destroy)
+1. **Better Centipede Movement**
+- Zigzag pattern with edge detection
+- Drop down when hitting mushrooms
+- Speed increases as segments are destroyed
+1. **Additional Enemies**
+- Spider (diagonal movement)
+- Flea (drops from top, creates mushrooms)
+- Scorpion (horizontal movement, poisons mushrooms)
+1. **Levels and Progression**
+- Increasing difficulty
+- Faster enemy movement
+- More segments per centipede
+1. **Lives System**
+- Multiple lives
+- Player respawn
+- Game over screen
+
+### Polish and UX
+
+1. **Better Rendering**
+- Use Lip Gloss for colors
+- Different characters for different entities
+- Animated effects for explosions
+1. **Sound** (optional)
+- Terminal bell for events
+- Or integrate with system audio
+1. **High Scores**
+- SQLite database
+- Leaderboard screen
+- Player name entry
+1. **Menus**
+- Main menu
+- Settings menu
+- Help screen
+1. **Configuration**
+- Customizable controls
+- Difficulty settings
+- TOML config file support
+
+### Performance Considerations
+
+- Use object pooling for bullets
+- Limit active entities
+- Optimize collision detection (spatial partitioning)
+- Profile with `pprof` if needed
+
+-----
+
+## Resources
+
+### Documentation
+
+- [Bubble Tea GitHub](https://github.com/charmbracelet/bubbletea)
+- [Bubble Tea Tutorial](https://github.com/charmbracelet/bubbletea/tree/master/tutorials)
+- [Tetrigo Source](https://github.com/Broderick-Westrope/tetrigo)
+- [Lip Gloss](https://github.com/charmbracelet/lipgloss)
+- [Bubbles Components](https://github.com/charmbracelet/bubbles)
+
+### Example Projects
+
+- Tetrigo (Tetris)
+- Glow (Markdown reader)
+- Soft Serve (Git server TUI)
+- gh-dash (GitHub dashboard)
+
+### Classic Centipede References
+
+- [Arcade Museum](https://www.arcade-museum.com/game_detail.php?game_id=7403)
+- [Wikipedia](https://en.wikipedia.org/wiki/Centipede_(video_game))
+- Original 2009 Tetris Design Guideline (in Tetrigo repo)
+
+-----
+
+## Conclusion
+
+Building Centipede with Bubble Tea follows a similar pattern to Tetrigo:
+
+1. **Separate concerns**: Keep game logic independent from UI
+1. **Use The Elm Architecture**: Model-Update-View pattern
+1. **Commands for timing**: Use `tea.Tick` for game loop
+1. **Clean rendering**: Build board state, render as string
+1. **Handle input gracefully**: Map keys to game actions
+
+The minimal example provided gives you a working foundation. From there, you can incrementally add features following the implementation strategy outlined above.
+
+The beauty of Bubble Tea is that it handles all the terminal complexity for you, letting you focus on game logic and creating an enjoyable player experience.
+
+Good luck building your Centipede game! 🐛🎮
+
+
