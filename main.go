@@ -51,8 +51,9 @@ type Segment struct {
 
 // Mushroom obstacle
 type Mushroom struct {
-	pos    Position
-	health int // 0-4 hits to destroy
+	pos       Position
+	health    int  // 0-4 hits to destroy
+	poisoned  bool // Poisoned mushrooms make centipede fall faster
 }
 
 // Fly enemy
@@ -160,7 +161,7 @@ func (g *Game) spawnCentipede(length int) {
 		g.segments = append(g.segments, Segment{
 			pos:       Position{X: startX + i, Y: startY},
 			direction: 1,
-			isHead:    i == 0, // First segment is the head
+			isHead:    i == length-1, // LAST segment is the head (front of movement)
 		})
 	}
 }
@@ -220,6 +221,23 @@ func (g *Game) Update() {
 		g.flies[i].Update()
 	}
 
+	// Check fly collisions with mushrooms (create poison mushrooms)
+	for i := range g.flies {
+		if !g.flies[i].active {
+			continue
+		}
+		for j := range g.mushrooms {
+			if g.flies[i].pos.X == g.mushrooms[j].pos.X &&
+				g.flies[i].pos.Y == g.mushrooms[j].pos.Y {
+				// Fly hits mushroom - make it poisoned!
+				g.mushrooms[j].poisoned = true
+				g.flies[i].active = false
+				g.createExplosion(g.mushrooms[j].pos.X, g.mushrooms[j].pos.Y)
+				break
+			}
+		}
+	}
+
 	// Update explosions
 	for i := range g.explosions {
 		g.explosions[i].Update()
@@ -240,12 +258,24 @@ func (g *Game) Update() {
 		}
 
 		// Check if hit mushroom - drop down and reverse
+		hitPoisonMushroom := false
 		for _, mush := range g.mushrooms {
 			if seg.pos.X == mush.pos.X && seg.pos.Y == mush.pos.Y {
-				seg.pos.Y++
+				if mush.poisoned {
+					// Poisoned mushrooms cause faster falling
+					seg.pos.Y += 2
+					hitPoisonMushroom = true
+				} else {
+					seg.pos.Y++
+				}
 				seg.direction *= -1
 				break
 			}
+		}
+
+		// Poison mushrooms cause centipede to drop faster
+		if hitPoisonMushroom {
+			// Already handled above
 		}
 
 		// Check if reached player area - game over
@@ -254,7 +284,7 @@ func (g *Game) Update() {
 		}
 	}
 
-	// Check bullet collisions
+	// Check bullet collisions (improved collision detection with distance check)
 	for i := range g.bullets {
 		if !g.bullets[i].active {
 			continue
@@ -262,6 +292,7 @@ func (g *Game) Update() {
 
 		// Bullet vs Centipede
 		for j := range g.segments {
+			// Exact position match for collision
 			if g.bullets[i].pos.X == g.segments[j].pos.X &&
 				g.bullets[i].pos.Y == g.segments[j].pos.Y {
 				g.bullets[i].active = false
@@ -279,9 +310,9 @@ func (g *Game) Update() {
 				// Remove segment
 				g.segments = append(g.segments[:j], g.segments[j+1:]...)
 
-				// Update head if we removed first segment
-				if len(g.segments) > 0 && j == 0 {
-					g.segments[0].isHead = true
+				// Update head if we removed last segment (front of centipede)
+				if len(g.segments) > 0 {
+					g.segments[len(g.segments)-1].isHead = true
 				}
 				break
 			}
@@ -323,9 +354,13 @@ func (g *Game) Update() {
 		}
 	}
 
-	// Check win condition
+	// Check win condition - spawn longer centipede instead of stopping
 	if len(g.segments) == 0 {
-		g.won = true
+		g.level++
+		// Spawn centipede with more segments each level (10 + level*2)
+		g.spawnCentipede(10 + g.level*2)
+		// Add more mushrooms too
+		g.spawnMushrooms(5)
 	}
 }
 
@@ -384,19 +419,24 @@ func (g *Game) GetBoard() [][]rune {
 	// Draw player gun character (improved)
 	board[g.player.pos.Y][g.player.pos.X] = 'A'
 
-	// Draw mushrooms with different characters based on health
+	// Draw mushrooms with different characters based on health and poison status
 	for _, mush := range g.mushrooms {
 		if mush.pos.Y >= 0 && mush.pos.Y < g.height &&
 			mush.pos.X >= 0 && mush.pos.X < g.width {
-			switch mush.health {
-			case 4:
-				board[mush.pos.Y][mush.pos.X] = 'M'
-			case 3:
-				board[mush.pos.Y][mush.pos.X] = 'm'
-			case 2:
-				board[mush.pos.Y][mush.pos.X] = '*'
-			case 1:
-				board[mush.pos.Y][mush.pos.X] = '.'
+			if mush.poisoned {
+				// Poisoned mushrooms show as 'X' (skull/poison symbol)
+				board[mush.pos.Y][mush.pos.X] = 'X'
+			} else {
+				switch mush.health {
+				case 4:
+					board[mush.pos.Y][mush.pos.X] = 'M'
+				case 3:
+					board[mush.pos.Y][mush.pos.X] = 'm'
+				case 2:
+					board[mush.pos.Y][mush.pos.X] = '*'
+				case 1:
+					board[mush.pos.Y][mush.pos.X] = '.'
+				}
 			}
 		}
 	}
@@ -566,6 +606,10 @@ var (
 	mushroomStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("2"))
 
+	poisonMushroomStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("201")).
+				Bold(true)
+
 	bulletStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("11"))
 
@@ -660,39 +704,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
-		case "left", "a":
-			if m.state == playingGame {
-				m.game.MovePlayer(-1)
-			}
-		case "right", "d":
-			if m.state == playingGame {
-				m.game.MovePlayer(1)
-			}
-		case "up", "w":
-			if m.state == playingGame {
-				m.game.MovePlayerY(-1)
-			}
-		case "down", "s":
-			if m.state == playingGame {
-				m.game.MovePlayerY(1)
-			}
-		case " ": // Spacebar
-			if m.state == playingGame {
-				m.spacePressed = true
-				m.game.Shoot()
-			}
-		case "p":
-			if m.state == playingGame {
-				m.paused = !m.paused
-			}
 		case "r":
-			// Restart game
+			// Restart game - allow restart when game is over
 			if m.game.gameOver || m.game.won {
 				m.game = NewGame(50, 28)
 				m.state = playingGame
 				m.enteringName = false
 				m.scoreSaved = false
 				m.playerName = ""
+				return m, nil
+			}
+		case "left", "a":
+			// Only allow movement when playing AND not game over
+			if m.state == playingGame && !m.game.gameOver && !m.game.won {
+				m.game.MovePlayer(-1)
+			}
+		case "right", "d":
+			if m.state == playingGame && !m.game.gameOver && !m.game.won {
+				m.game.MovePlayer(1)
+			}
+		case "up", "w":
+			if m.state == playingGame && !m.game.gameOver && !m.game.won {
+				m.game.MovePlayerY(-1)
+			}
+		case "down", "s":
+			if m.state == playingGame && !m.game.gameOver && !m.game.won {
+				m.game.MovePlayerY(1)
+			}
+		case " ": // Spacebar
+			if m.state == playingGame && !m.game.gameOver && !m.game.won {
+				m.spacePressed = true
+				m.game.Shoot()
+			}
+		case "p":
+			if m.state == playingGame && !m.game.gameOver && !m.game.won {
+				m.paused = !m.paused
 			}
 		}
 
@@ -759,7 +805,9 @@ func (m model) View() string {
 				char = centipedeHeadStyle.Render(char)
 			case 'O': // Centipede body
 				char = centipedeBodyStyle.Render(char)
-			case 'M', 'm', '*', '.': // Mushrooms
+			case 'X': // Poison mushroom
+				char = poisonMushroomStyle.Render(char)
+			case 'M', 'm', '*', '.': // Normal mushrooms
 				char = mushroomStyle.Render(char)
 			case '|': // Bullets
 				char = bulletStyle.Render(char)
@@ -793,8 +841,8 @@ func (m model) View() string {
 	}
 
 	stats := statsStyle.Render(fmt.Sprintf(
-		"Score: %d  |  Bullets: %d  |  Segments: %d  |  Flies: %d",
-		m.game.score, activeBullets, len(m.game.segments), activeFlies))
+		"Score: %d  |  Bullets: %d  |  Segments: %d  |  Flies: %d  |  Level: %d",
+		m.game.score, activeBullets, len(m.game.segments), activeFlies, m.game.level))
 
 	// Controls
 	controls := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(

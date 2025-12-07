@@ -12,7 +12,10 @@ A terminal-based clone of the classic arcade game Centipede, built with [Bubble 
 - **High Score System**: Top 10 high scores saved to `highscores.txt` with name entry
 - **Flashing Messages**: Animated "Press any key to continue" on splash screen
 - **Classic Centipede Gameplay**: Shoot the descending centipede segments as they zigzag down the screen
+- **Progressive Difficulty**: Each level spawns longer centipedes (10 + level×2 segments)
+- **Correct Head Position**: Head segment (@) is at the FRONT of the centipede (direction of movement)
 - **Mushroom Obstacles**: Destroyable mushrooms (4 hits) that affect centipede movement
+- **Poison Mushrooms**: Flies that hit mushrooms create poison mushrooms (X) that make centipedes fall 2× faster!
 - **Smart Falling Mechanics**: Centipedes drop down and reverse direction when hitting edges or mushrooms
 - **Player Movement**: Full directional control in the bottom quarter of the screen
 - **Unlimited Rapid Fire**: Hold spacebar to fire bullets continuously (10 per second!)
@@ -29,8 +32,10 @@ A terminal-based clone of the classic arcade game Centipede, built with [Bubble 
   - Magenta centipede head ('@')
   - Purple centipede body ('O')
   - Green mushrooms ('M' → 'm' → '*' → '.')
+  - Magenta poison mushrooms ('X')
   - Yellow bullets ('|')
-- **Game States**: Win/lose conditions with restart capability
+- **Game States**: Continuous play with progressive levels
+- **Improved Game Over**: Player controls freeze when game ends, 'R' to restart works properly
 - **Pause Function**: Freeze the action with 'P'
 
 ## 📦 Installation
@@ -81,15 +86,17 @@ go run main.go
 1. **Start**: Press any key on the splash screen to begin
 2. **Objective**: Destroy all centipede segments before they reach the bottom
 3. **Strategy**:
-   - Aim for the head (@) for bonus points (100 vs 10)
+   - Aim for the head (@) for bonus points (100 vs 10) - head is at the FRONT!
    - Hold spacebar for UNLIMITED rapid fire (10 bullets/second!)
    - Shoot flies (✺) for 200 points - watch for their flickering wings
+   - **AVOID poison mushrooms (X)** - they make centipedes fall 2× faster!
+   - Flies that hit mushrooms create poison mushrooms - watch out!
    - Destroy mushrooms to create clear lanes
    - Use vertical movement to dodge and position
    - Watch centipede drop patterns when hitting obstacles
    - Explosions appear when you hit enemies!
 4. **Game Over**: Centipede reaches the player area (bottom 3 rows)
-5. **Victory**: Destroy all 10 segments
+5. **Progressive Levels**: Destroy all segments to spawn a longer, harder centipede!
 6. **High Score**: Enter your name if you make the top 10!
 
 ## 🏗️ Technical Details
@@ -151,8 +158,8 @@ main.go
 ```
 ┌──────────────────────────────────────────────────┐
 │                                                  │
-│       @OOOOOOOOO                                 │  ← Centipede (@ = head, O = body)
-│          M      m    *         .                 │  ← Mushrooms (M=full, m=damaged, *=weak, .=critical)
+│       OOOOOOOO@                                  │  ← Centipede (@ = head at FRONT, O = body)
+│          M      m    *    X    .                 │  ← Mushrooms (M=full, m=damaged, *=weak, .=critical, X=POISON!)
 │                           ✺~.                    │  ← Fly with wing trail
 │                     |  ✹                         │  ← Bullet & Explosion
 │                     |                            │
@@ -160,14 +167,17 @@ main.go
 │                     A                            │  ← Player gun
 └──────────────────────────────────────────────────┘
 
-Score: 320  |  Bullets: 15  |  Segments: 7  |  Flies: 1
+Score: 320  |  Bullets: 15  |  Segments: 7  |  Flies: 1  |  Level: 2
 ```
 
 ## 🚀 Future Enhancements
 
 Potential additions for future versions:
 
-- [ ] Multiple levels with increasing difficulty
+- [x] Multiple levels with increasing difficulty (DONE! v4.0)
+- [x] Correct head positioning (DONE! v4.0)
+- [x] Poison mushrooms (DONE! v4.0)
+- [x] Improved game over controls (DONE! v4.0)
 - [ ] Additional enemies (Spider, Flea, Scorpion) - Flea/Spider on splash
 - [ ] Lives system with respawn
 - [x] High score tracking (DONE!)
