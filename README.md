@@ -2,6 +2,8 @@
 
 A terminal-based clone of the classic arcade game Centipede, built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and Go.
 
+> **Other Projects**: Check out our [🧊 Rubik's Cube Solver](https://github.com/michaellavery-grp/rubiks-cube-solver) - a terminal-based 3D ASCII Rubik's Cube with isometric rendering and move reversal solver!
+
 ![Centipede Demo](https://img.shields.io/badge/status-playable-green)
 ![Go Version](https://img.shields.io/badge/go-1.18+-blue)
 ![License](https://img.shields.io/badge/license-MIT-blue)
