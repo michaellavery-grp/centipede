@@ -361,7 +361,7 @@ func (g *Game) Update() {
 	g.spawnFlea()
 
 	// Update centipede segments with improved falling behavior
-	for i := range g.segments {
+	for i := 0; i < len(g.segments); i++ {
 		seg := &g.segments[i]
 		seg.pos.X += seg.direction
 
@@ -400,6 +400,17 @@ func (g *Game) Update() {
 		// Check for collision with player
 		if seg.pos.X == g.player.pos.X && seg.pos.Y == g.player.pos.Y {
 			g.loseLife()
+		}
+
+		// CRITICAL FIX: Check if centipede escaped to bottom (reached player area)
+		// If ANY segment reaches the bottom without hitting player, it's a death
+		// This fixes the bug where centipedes can escape "stage left"
+		if seg.pos.Y >= g.height-2 {
+			g.loseLife()
+			// Remove this segment so we don't trigger multiple deaths from same segment
+			g.segments = append(g.segments[:i], g.segments[i+1:]...)
+			i-- // Adjust index since we removed an element
+			continue
 		}
 	}
 
