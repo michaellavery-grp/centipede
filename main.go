@@ -122,26 +122,32 @@ type HighScore struct {
 
 // Game state
 type Game struct {
-	width      int
-	height     int
-	player     Player
-	segments   []Segment
-	bullets    []Bullet
-	mushrooms  []Mushroom
-	flies      []Fly
-	explosions []Explosion
-	score      int
-	level      int
-	gameOver   bool
-	won        bool
+	width         int
+	height        int
+	player        Player
+	segments      []Segment
+	bullets       []Bullet
+	mushrooms     []Mushroom
+	flies         []Fly
+	explosions    []Explosion
+	score         int
+	level         int
+	lives         int
+	lastLifeScore int // Track score for bonus life awards
+	respawning    bool
+	respawnTimer  int
+	gameOver      bool
+	won           bool
 }
 
 func NewGame(width, height int) *Game {
 	g := &Game{
-		width:  width,
-		height: height,
-		player: Player{pos: Position{X: width / 2, Y: height - 2}},
-		level:  1,
+		width:         width,
+		height:        height,
+		player:        Player{pos: Position{X: width / 2, Y: height - 2}},
+		level:         1,
+		lives:         3,
+		lastLifeScore: 0,
 	}
 
 	// Create initial centipede at top with head
@@ -211,6 +217,29 @@ func (g *Game) Update() {
 		return
 	}
 
+	// Handle respawn timer
+	if g.respawning {
+		g.respawnTimer--
+		if g.respawnTimer <= 0 {
+			g.respawning = false
+			// Clear any segments near player area
+			var newSegments []Segment
+			for _, seg := range g.segments {
+				if seg.pos.Y < g.height-10 {
+					newSegments = append(newSegments, seg)
+				}
+			}
+			g.segments = newSegments
+		}
+		return // Don't update game during respawn
+	}
+
+	// Check for bonus life every 10,000 points
+	if g.score >= g.lastLifeScore+10000 {
+		g.lives++
+		g.lastLifeScore = g.score - (g.score % 10000) // Set to nearest 10k
+	}
+
 	// Update bullets
 	for i := range g.bullets {
 		g.bullets[i].Update()
@@ -262,8 +291,13 @@ func (g *Game) Update() {
 		for _, mush := range g.mushrooms {
 			if seg.pos.X == mush.pos.X && seg.pos.Y == mush.pos.Y {
 				if mush.poisoned {
-					// Poisoned mushrooms cause faster falling
-					seg.pos.Y += 2
+					// POISON MUSHROOM CHUTE: Creates 3-char wide zigzag descent
+					// Force centipede into zigzag pattern by alternating direction
+					seg.pos.Y++ // Drop down
+					seg.direction *= -1 // Reverse direction
+
+					// Create tight zigzag by limiting horizontal movement
+					// The centipede will zigzag within a 3-character chute
 					hitPoisonMushroom = true
 				} else {
 					seg.pos.Y++
@@ -273,14 +307,14 @@ func (g *Game) Update() {
 			}
 		}
 
-		// Poison mushrooms cause centipede to drop faster
+		// Poison mushrooms cause centipede to drop faster in zigzag chute
 		if hitPoisonMushroom {
-			// Already handled above
+			// Already handled above - centipede drops and zigzags
 		}
 
-		// Check if reached player area - game over
-		if seg.pos.Y >= g.height-3 {
-			g.gameOver = true
+		// Check for collision with player
+		if seg.pos.X == g.player.pos.X && seg.pos.Y == g.player.pos.Y {
+			g.loseLife()
 		}
 	}
 
@@ -361,6 +395,8 @@ func (g *Game) Update() {
 		g.spawnCentipede(10 + g.level*2)
 		// Add more mushrooms too
 		g.spawnMushrooms(5)
+		// Regenerate all mushrooms to full health
+		g.regenerateMushrooms()
 	}
 }
 
@@ -407,6 +443,32 @@ func (g *Game) Shoot() {
 	})
 }
 
+func (g *Game) loseLife() {
+	g.lives--
+	if g.lives <= 0 {
+		g.gameOver = true
+	} else {
+		// Start respawn sequence
+		g.respawning = true
+		g.respawnTimer = 30 // 30 ticks ~2.4 seconds
+		// Reset player position
+		g.player.pos.X = g.width / 2
+		g.player.pos.Y = g.height - 2
+		// Clear bullets
+		g.bullets = nil
+		// Regenerate all mushrooms to full health
+		g.regenerateMushrooms()
+	}
+}
+
+func (g *Game) regenerateMushrooms() {
+	// Restore all mushrooms to full health (4) and clear poison
+	for i := range g.mushrooms {
+		g.mushrooms[i].health = 4
+		g.mushrooms[i].poisoned = false // Reset poison status
+	}
+}
+
 func (g *Game) GetBoard() [][]rune {
 	board := make([][]rune, g.height)
 	for i := range board {
@@ -416,8 +478,10 @@ func (g *Game) GetBoard() [][]rune {
 		}
 	}
 
-	// Draw player gun character (improved)
-	board[g.player.pos.Y][g.player.pos.X] = 'A'
+	// Draw player gun character (improved) - hide during respawn
+	if !g.respawning {
+		board[g.player.pos.Y][g.player.pos.X] = 'A'
+	}
 
 	// Draw mushrooms with different characters based on health and poison status
 	for _, mush := range g.mushrooms {
@@ -840,9 +904,15 @@ func (m model) View() string {
 		}
 	}
 
+	// Create lives display
+	livesStr := ""
+	for i := 0; i < m.game.lives; i++ {
+		livesStr += "♥"
+	}
+
 	stats := statsStyle.Render(fmt.Sprintf(
-		"Score: %d  |  Bullets: %d  |  Segments: %d  |  Flies: %d  |  Level: %d",
-		m.game.score, activeBullets, len(m.game.segments), activeFlies, m.game.level))
+		"Score: %d  |  Lives: %s  |  Bullets: %d  |  Segments: %d  |  Flies: %d  |  Level: %d",
+		m.game.score, livesStr, activeBullets, len(m.game.segments), activeFlies, m.game.level))
 
 	// Controls
 	controls := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(
@@ -850,7 +920,12 @@ func (m model) View() string {
 
 	// Status messages
 	status := ""
-	if m.paused {
+	if m.game.respawning {
+		status = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("196")).
+			Bold(true).
+			Render(fmt.Sprintf("💥 RESPAWNING... %d", m.game.respawnTimer/10))
+	} else if m.paused {
 		status = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("11")).
 			Bold(true).

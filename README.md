@@ -12,10 +12,14 @@ A terminal-based clone of the classic arcade game Centipede, built with [Bubble 
 - **High Score System**: Top 10 high scores saved to `highscores.txt` with name entry
 - **Flashing Messages**: Animated "Press any key to continue" on splash screen
 - **Classic Centipede Gameplay**: Shoot the descending centipede segments as they zigzag down the screen
+- **Lives System**: Start with 3 lives (♥♥♥), earn bonus life every 10,000 points!
+- **Player Collision**: Lose a life when centipede touches you - respawn with 2.4 second invincibility
 - **Progressive Difficulty**: Each level spawns longer centipedes (10 + level×2 segments)
 - **Correct Head Position**: Head segment (@) is at the FRONT of the centipede (direction of movement)
 - **Mushroom Obstacles**: Destroyable mushrooms (4 hits) that affect centipede movement
-- **Poison Mushrooms**: Flies that hit mushrooms create poison mushrooms (X) that make centipedes fall 2× faster!
+- **Mushroom Regeneration**: All mushrooms restore to full health on level complete or player death
+- **Poison Mushrooms**: Flies that hit mushrooms create poison mushrooms (X) - creates deadly 3-char zigzag chute!
+- **Poison Mushroom Chute**: Centipedes hitting poison mushrooms drop in tight zigzag pattern straight down
 - **Smart Falling Mechanics**: Centipedes drop down and reverse direction when hitting edges or mushrooms
 - **Player Movement**: Full directional control in the bottom quarter of the screen
 - **Unlimited Rapid Fire**: Hold spacebar to fire bullets continuously (10 per second!)
@@ -83,19 +87,26 @@ go run main.go
 
 ## 🎯 How to Play
 
-1. **Start**: Press any key on the splash screen to begin
-2. **Objective**: Destroy all centipede segments before they reach the bottom
+1. **Start**: Press any key on the splash screen to begin with 3 lives (♥♥♥)
+2. **Objective**: Destroy all centipede segments before they touch you!
 3. **Strategy**:
    - Aim for the head (@) for bonus points (100 vs 10) - head is at the FRONT!
    - Hold spacebar for UNLIMITED rapid fire (10 bullets/second!)
    - Shoot flies (✺) for 200 points - watch for their flickering wings
-   - **AVOID poison mushrooms (X)** - they make centipedes fall 2× faster!
-   - Flies that hit mushrooms create poison mushrooms - watch out!
+   - **AVOID poison mushrooms (X)** - they create deadly 3-char zigzag chutes!
+   - Flies that hit mushrooms create poison mushrooms - prevent this!
+   - Poison mushrooms force centipedes into tight zigzag descent
    - Destroy mushrooms to create clear lanes
    - Use vertical movement to dodge and position
    - Watch centipede drop patterns when hitting obstacles
    - Explosions appear when you hit enemies!
-4. **Game Over**: Centipede reaches the player area (bottom 3 rows)
+4. **Lives System**:
+   - Start with 3 lives
+   - Lose a life when centipede touches you
+   - Respawn with 2.4 second invincibility
+   - Earn bonus life every 10,000 points
+   - Mushrooms regenerate to full health on death or level complete
+   - Game over when all lives lost
 5. **Progressive Levels**: Destroy all segments to spawn a longer, harder centipede!
 6. **High Score**: Enter your name if you make the top 10!
 
@@ -167,7 +178,7 @@ main.go
 │                     A                            │  ← Player gun
 └──────────────────────────────────────────────────┘
 
-Score: 320  |  Bullets: 15  |  Segments: 7  |  Flies: 1  |  Level: 2
+Score: 320  |  Lives: ♥♥♥  |  Bullets: 15  |  Segments: 7  |  Flies: 1  |  Level: 2
 ```
 
 ## 🚀 Future Enhancements
@@ -177,9 +188,13 @@ Potential additions for future versions:
 - [x] Multiple levels with increasing difficulty (DONE! v4.0)
 - [x] Correct head positioning (DONE! v4.0)
 - [x] Poison mushrooms (DONE! v4.0)
+- [x] Poison mushroom zigzag chute (DONE! v5.0)
 - [x] Improved game over controls (DONE! v4.0)
+- [x] Lives system with respawn (DONE! v5.0)
+- [x] Bonus lives every 10k points (DONE! v5.0)
+- [x] Player collision detection (DONE! v5.0)
+- [x] Mushroom regeneration on death/level (DONE! v5.0)
 - [ ] Additional enemies (Spider, Flea, Scorpion) - Flea/Spider on splash
-- [ ] Lives system with respawn
 - [x] High score tracking (DONE!)
 - [x] Splash screen with ASCII art (DONE!)
 - [x] Unlimited rapid fire bullets (DONE!)
@@ -189,7 +204,6 @@ Potential additions for future versions:
 - [ ] Configuration file (TOML)
 - [ ] Centipede segment splitting when hit mid-body
 - [ ] Speed increases as segments are destroyed
-- [ ] Mushroom regeneration between levels
 - [ ] Online leaderboard
 
 ## 🐛 Known Issues
