@@ -12,8 +12,10 @@ A terminal-based clone of the classic arcade game Centipede, built with [Bubble 
 - **High Score System**: Top 10 high scores saved to `highscores.txt` with name entry
 - **Flashing Messages**: Animated "Press any key to continue" on splash screen
 - **Classic Centipede Gameplay**: Shoot the descending centipede segments as they zigzag down the screen
-- **Lives System**: Start with 3 lives (♥♥♥), earn bonus life every 10,000 points!
-- **Player Collision**: Lose a life when centipede touches you - respawn with 2.4 second invincibility
+- **DUAL CENTIPEDES**: Two centipedes attack simultaneously from different positions for intense action!
+- **Falling Fleas**: Yellow fleas (┃) drop from the top creating mushrooms - adds constant pressure!
+- **Lives System**: Start with 3 lives (♥♥♥), earn bonus life every 20,000 points!
+- **Player Collision**: Lose a life when centipede or flea touches you - respawn with 2.4 second invincibility
 - **Progressive Difficulty**: Each level spawns longer centipedes (10 + level×2 segments)
 - **Correct Head Position**: Head segment (@) is at the FRONT of the centipede (direction of movement)
 - **Mushroom Obstacles**: Destroyable mushrooms (4 hits) that affect centipede movement
@@ -29,6 +31,7 @@ A terminal-based clone of the classic arcade game Centipede, built with [Bubble 
   - Body segment: 10 points
   - Head segment: 100 points
   - Fly enemy: 200 points
+  - Flea enemy: 150 points
   - Mushroom hit: 1 point
   - Mushroom destroyed: 5 points total
 - **Color-Coded Display**: Using Lip Gloss for terminal styling
@@ -38,6 +41,8 @@ A terminal-based clone of the classic arcade game Centipede, built with [Bubble 
   - Green mushrooms ('M' → 'm' → '*' → '.')
   - Magenta poison mushrooms ('X')
   - Yellow bullets ('|')
+  - Orange flies ('✺') with gray wing trails ('~.')
+  - Bright yellow fleas ('┃')
 - **Game States**: Continuous play with progressive levels
 - **Improved Game Over**: Player controls freeze when game ends, 'R' to restart works properly
 - **Pause Function**: Freeze the action with 'P'

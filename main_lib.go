@@ -64,12 +64,6 @@ type Fly struct {
 	wingFlap  bool // Alternates for wing animation
 }
 
-// Flea enemy - falls from top and creates mushrooms
-type Flea struct {
-	pos    Position
-	active bool
-}
-
 func (f *Fly) Update() {
 	if !f.active {
 		return
@@ -135,7 +129,6 @@ type Game struct {
 	bullets       []Bullet
 	mushrooms     []Mushroom
 	flies         []Fly
-	fleas         []Flea
 	explosions    []Explosion
 	score         int
 	level         int
@@ -160,27 +153,10 @@ func NewGame(width, height int) *Game {
 	// Create initial centipede at top with head
 	g.spawnCentipede(10)
 
-	// Spawn SECOND centipede for increased difficulty!
-	g.spawnSecondCentipede(8)
-
 	// Create random mushrooms - INCREASED for difficulty
 	g.spawnMushrooms(25) // Was 15, now 25 for more obstacles
 
 	return g
-}
-
-func (g *Game) spawnSecondCentipede(length int) {
-	// Spawn second centipede offset from first
-	startX := 25 // Offset from first centipede
-	startY := 2
-
-	for i := 0; i < length; i++ {
-		g.segments = append(g.segments, Segment{
-			pos:       Position{X: startX + i, Y: startY},
-			direction: -1, // Moving left (opposite of first)
-			isHead:    i == length-1,
-		})
-	}
 }
 
 func (g *Game) spawnCentipede(length int) {
@@ -224,50 +200,6 @@ func (g *Game) spawnFly() {
 			active:    true,
 			wingFlap:  false,
 		})
-	}
-}
-
-func (g *Game) spawnFlea() {
-	// Spawn falling fleas when mushroom count is low
-	mushroomCount := len(g.mushrooms)
-	if mushroomCount < 15 && rand.Float64() < 0.03 { // 3% chance when low mushrooms
-		x := rand.Intn(g.width-4) + 2
-		g.fleas = append(g.fleas, Flea{
-			pos:    Position{X: x, Y: 2},
-			active: true,
-		})
-	}
-}
-
-func (f *Flea) Update(g *Game) {
-	if !f.active {
-		return
-	}
-
-	// Flea falls straight down
-	f.pos.Y++
-
-	// Create mushroom occasionally as it falls
-	if rand.Float64() < 0.4 && f.pos.Y > 5 { // 40% chance per tick
-		// Add mushroom at current position if none exists
-		exists := false
-		for _, m := range g.mushrooms {
-			if m.pos.X == f.pos.X && m.pos.Y == f.pos.Y {
-				exists = true
-				break
-			}
-		}
-		if !exists {
-			g.mushrooms = append(g.mushrooms, Mushroom{
-				pos:    Position{X: f.pos.X, Y: f.pos.Y},
-				health: 4,
-			})
-		}
-	}
-
-	// Deactivate if reached bottom
-	if f.pos.Y >= g.height-2 {
-		f.active = false
 	}
 }
 
@@ -318,11 +250,6 @@ func (g *Game) Update() {
 		g.flies[i].Update()
 	}
 
-	// Update fleas
-	for i := range g.fleas {
-		g.fleas[i].Update(g)
-	}
-
 	// Check fly collisions with mushrooms (create poison mushrooms)
 	for i := range g.flies {
 		if !g.flies[i].active {
@@ -340,25 +267,13 @@ func (g *Game) Update() {
 		}
 	}
 
-	// Check flea collision with player
-	for i := range g.fleas {
-		if !g.fleas[i].active {
-			continue
-		}
-		if g.fleas[i].pos.X == g.player.pos.X && g.fleas[i].pos.Y == g.player.pos.Y {
-			g.loseLife()
-			g.fleas[i].active = false
-		}
-	}
-
 	// Update explosions
 	for i := range g.explosions {
 		g.explosions[i].Update()
 	}
 
-	// Spawn flies and fleas
+	// Spawn flies
 	g.spawnFly()
-	g.spawnFlea()
 
 	// Update centipede segments with improved falling behavior
 	for i := range g.segments {
@@ -451,24 +366,6 @@ func (g *Game) Update() {
 				g.createExplosion(g.flies[j].pos.X, g.flies[j].pos.Y)
 
 				g.score += 200 // Flies worth 200 points
-				break
-			}
-		}
-
-		// Bullet vs Flea
-		for j := range g.fleas {
-			if !g.fleas[j].active {
-				continue
-			}
-			if g.bullets[i].pos.X == g.fleas[j].pos.X &&
-				g.bullets[i].pos.Y == g.fleas[j].pos.Y {
-				g.bullets[i].active = false
-				g.fleas[j].active = false
-
-				// Create explosion
-				g.createExplosion(g.fleas[j].pos.X, g.fleas[j].pos.Y)
-
-				g.score += 150 // Fleas worth 150 points
 				break
 			}
 		}
@@ -628,14 +525,6 @@ func (g *Game) GetBoard() [][]rune {
 					board[fly.pos.Y][trailX2] = '.'
 				}
 			}
-		}
-	}
-
-	// Draw fleas (falling down)
-	for _, flea := range g.fleas {
-		if flea.active && flea.pos.Y >= 0 && flea.pos.Y < g.height &&
-			flea.pos.X >= 0 && flea.pos.X < g.width {
-			board[flea.pos.Y][flea.pos.X] = '┃' // Vertical bar for flea
 		}
 	}
 
@@ -829,8 +718,7 @@ func (m model) Init() tea.Cmd {
 }
 
 func tickCmd() tea.Cmd {
-	// FASTER game speed for difficulty - was 80ms, now 50ms
-	return tea.Tick(time.Millisecond*50, func(t time.Time) tea.Msg {
+	return tea.Tick(time.Millisecond*80, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
@@ -989,8 +877,6 @@ func (m model) View() string {
 				char = bulletStyle.Render(char)
 			case '✺': // Fly
 				char = flyStyle.Render(char)
-			case '┃': // Flea
-				char = lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Bold(true).Render(char)
 			case '~': // Wing trail (darker)
 				char = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(char)
 			case '✶', '✸', '✹': // Explosions
@@ -1149,16 +1035,3 @@ func (m model) renderNameEntry() string {
 	)
 }
 
-func main() {
-	rand.Seed(time.Now().UnixNano())
-
-	p := tea.NewProgram(
-		initialModel(),
-		tea.WithAltScreen(),
-	)
-
-	if _, err := p.Run(); err != nil {
-		fmt.Printf("Error: %v", err)
-		os.Exit(1)
-	}
-}
